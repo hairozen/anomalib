@@ -126,7 +126,7 @@ def superimpose_anomaly_map(
     """
 
     anomaly_map = anomaly_map_to_color_map(anomaly_map.squeeze(), normalize=normalize)
-    superimposed_map = cv2.addWeighted(anomaly_map, alpha, image, (1 - alpha), gamma)
+    superimposed_map = cv2.addWeighted(anomaly_map.astype(image.dtype), alpha, image, (1 - alpha), gamma)
     return superimposed_map
 
 
@@ -166,6 +166,10 @@ def draw_boxes(image: np.ndarray, boxes: np.ndarray, color: tuple[int, int, int]
         np.ndarray: Image showing the bounding boxes drawn on top of the source image.
     """
     for box in boxes:
-        x_1, y_1, x_2, y_2 = box.astype(int)
-        image = cv2.rectangle(image, (x_1, y_1), (x_2, y_2), color=color, thickness=2)
+        if not isinstance(box, np.ndarray):
+            box = box.detach().cpu().numpy().astype(int)
+        else:
+            box = box.astype(int)
+        x_1, y_1, x_2, y_2 = box
+        image = cv2.rectangle(image.copy(), (x_1, y_1), (x_2, y_2), color=color, thickness=2)
     return image

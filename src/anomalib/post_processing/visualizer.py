@@ -103,21 +103,21 @@ class Visualizer:
                 image = read_image(path=batch["image_path"][i], image_size=(height, width))
             elif "video_path" in batch:
                 height, width = batch["original_image"].shape[1:3]
-                image = batch["original_image"][i].squeeze().numpy()
+                image = batch["original_image"][i].squeeze().cpu().numpy()
                 image = cv2.resize(image, dsize=(width, height), interpolation=cv2.INTER_AREA)
             else:
                 raise KeyError("Batch must have either 'image_path' or 'video_path' defined.")
 
             image_result = ImageResult(
                 image=image,
-                pred_score=batch["pred_scores"][i].cpu().numpy().item(),
-                pred_label=batch["pred_labels"][i].cpu().numpy().item(),
+                pred_score=batch["pred_scores"][i].cpu().numpy().item() if batch["pred_scores"].numel() and batch["pred_scores"][i].numel() else None,
+                pred_label=batch["pred_labels"][i].cpu().numpy().item() if batch["pred_labels"].numel() and batch["pred_labels"][i].numel() else None,
                 anomaly_map=batch["anomaly_maps"][i].cpu().numpy() if "anomaly_maps" in batch else None,
                 pred_mask=batch["pred_masks"][i].squeeze().int().cpu().numpy() if "pred_masks" in batch else None,
                 gt_mask=batch["mask"][i].squeeze().int().cpu().numpy() if "mask" in batch else None,
                 gt_boxes=batch["boxes"][i].cpu().numpy() if "boxes" in batch else None,
-                pred_boxes=batch["pred_boxes"][i].cpu().numpy() if "pred_boxes" in batch else None,
-                box_labels=batch["box_labels"][i].cpu().numpy() if "box_labels" in batch else None,
+                pred_boxes=batch["pred_boxes"][i].cpu().numpy() if "pred_boxes" in batch and len(batch["pred_boxes"]) > 0 and batch["pred_boxes"][i].numel() else None,
+                box_labels=batch["box_labels"][i].cpu().numpy() if "box_labels" in batch and len(batch["box_labels"]) > 0 and batch["box_labels"][i].numel() else None,
             )
             yield self.visualize_image(image_result)
 
@@ -151,16 +151,19 @@ class Visualizer:
         """
         visualization = ImageGrid()
         if self.task == TaskType.DETECTION:
-            assert image_result.pred_boxes is not None
+            # assert image_result.pred_boxes is not None
             visualization.add_image(image_result.image, "Image")
             if image_result.gt_boxes is not None:
                 gt_image = draw_boxes(np.copy(image_result.image), image_result.gt_boxes, color=(255, 0, 0))
                 visualization.add_image(image=gt_image, color_map="gray", title="Ground Truth")
             else:
                 visualization.add_image(image_result.image, "Image")
-            pred_image = draw_boxes(np.copy(image_result.image), image_result.normal_boxes, color=(0, 255, 0))
-            pred_image = draw_boxes(pred_image, image_result.anomalous_boxes, color=(255, 0, 0))
-            visualization.add_image(pred_image, "Predictions")
+            if image_result.pred_boxes is not None:
+                pred_image = draw_boxes(np.copy(image_result.image), image_result.normal_boxes, color=(0, 255, 0))
+                pred_image = draw_boxes(pred_image, image_result.anomalous_boxes, color=(255, 0, 0))
+                visualization.add_image(pred_image, "Predictions")
+            else:
+                visualization.add_image(image_result.image, "Predictions")
         if self.task == TaskType.SEGMENTATION:
             assert image_result.pred_mask is not None
             visualization.add_image(image_result.image, "Image")
@@ -222,10 +225,18 @@ class Visualizer:
             image (np.ndarray): Image that will be shown in the window.
             delay (int): Delay in milliseconds to wait for keystroke. 0 for infinite.
         """
+
         image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        
+        ## For Jupyter Notebooks display
+        # Comment this 
         cv2.imshow(title, image)
         cv2.waitKey(delay)
         cv2.destroyAllWindows()
+        # Uncomment this
+        # plt.imshow(image)
+        # plt.show()
+
 
     @staticmethod
     def save(file_path: Path, image: np.ndarray) -> None:

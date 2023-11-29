@@ -55,6 +55,21 @@ class FeatureExtractor(nn.Module):
         self.velocity_extractor = VelocityExtractor(n_bins=n_velocity_bins)
         self.pose_extractor = PoseExtractor()
 
+    @staticmethod
+    def _slice_by_batch_indices(features: Tensor, indices: Tensor, batch_size: Tensor) -> List[Tensor]:
+        """
+        Split one tensor to a list of tensors based on the indices and the batch size.
+        In case there is no box for a frame in the batch an empty tensor is being added to preserve batch items order.
+        Example:
+
+            >>> features = tensor([0.1, 0.2, 0.3, 0.4, 0.5])
+            >>> indices = tensor([0, 0, 2, 2, 2])
+            >>> batch_size = tensor([3])
+            >>> slice_by_batch_indices(features, indices, batch_size)
+            [tensor([0.1, 0.2]), tensor([]), tensor([0.3, 0.4, 0.5])]
+        """
+        return [features[indices == i] if i in indices else torch.tensor([]) for i in range(batch_size)]
+
     def forward(
         self,
         rgb_batch: Tensor,
@@ -81,22 +96,32 @@ class FeatureExtractor(nn.Module):
         )
         boxes = torch.cat([indices.unsqueeze(1).to(rgb_batch.device), torch.cat(boxes_list)], dim=1)
 
-        # Extract features
-        feature_dict = {}
-        if self.use_velocity_features:
-            velocity_features = self.velocity_extractor(flow_batch, boxes)
-            feature_dict[FeatureType.VELOCITY] = [velocity_features[indices == i] for i in range(batch_size)]
-        if self.use_pose_features:
-            pose_features = self.pose_extractor(rgb_batch, boxes_list)
-            feature_dict[FeatureType.POSE] = pose_features
-        if self.use_deep_features:
-            deep_features = self.deep_extractor(rgb_batch, boxes, batch_size)
-            feature_dict[FeatureType.DEEP] = [deep_features[indices == i] for i in range(batch_size)]
+        # there is at least one box
+        if boxes.numel():
 
-        # dict of lists to list of dicts
-        feature_collection = [dict(zip(feature_dict, item)) for item in zip(*feature_dict.values())]
+            # Extract features
+            feature_dict = {}
+            if self.use_velocity_features:
+                velocity_features = self.velocity_extractor(flow_batch, boxes)
+                feature_dict[FeatureType.VELOCITY] = self._slice_by_batch_indices(velocity_features, indices, batch_size)
+            if self.use_pose_features:
+                pose_features = self.pose_extractor(rgb_batch, boxes_list)
+                pose_features = torch.cat(pose_features, dim=0)
+                feature_dict[FeatureType.POSE] = self._slice_by_batch_indices(pose_features, indices, batch_size)
+            if self.use_deep_features:
+                deep_features = self.deep_extractor(rgb_batch, boxes, batch_size)
+                feature_dict[FeatureType.DEEP] = self._slice_by_batch_indices(deep_features, indices, batch_size)
 
-        return feature_collection
+            # dict of lists to list of dicts
+            feature_collection = [dict(zip(feature_dict, item)) for item in zip(*feature_dict.values())]
+
+            return feature_collection
+
+        # there are no boxes
+        else:
+            return [{FeatureType.VELOCITY: torch.tensor([]),
+                     FeatureType.POSE: torch.tensor([]),
+                     FeatureType.DEEP: torch.tensor([])} for _ in range(batch_size)]
 
 
 class DeepExtractor(nn.Module):
@@ -151,7 +176,7 @@ class VelocityExtractor(nn.Module):
 
         Args:
             flows (Tensor): Batch of optical flow images of shape (N, 2, H, W)
-            boxes (Tensor): Bounding box coordinates of shaspe (M, 5). First column indicates batch index of the bbox.
+            boxes (Tensor): Bounding box coordinates of shape (M, 5). First column indicates batch index of the bbox.
 
         Returns:
             Tensor: Velocity feature tensor of shape (M, n_bins)
@@ -208,9 +233,10 @@ class PoseExtractor(nn.Module):
         poses = []
         for detection in keypoint_detections:
             boxes = detection["boxes"].unsqueeze(1)
-            keypoints = detection["keypoints"]
-            normalized_keypoints = (keypoints[..., :2] - boxes[..., :2]) / (boxes[..., 2:] - boxes[..., :2])
-            poses.append(normalized_keypoints.reshape(normalized_keypoints.shape[0], -1))
+            if boxes.shape[0] > 0:
+                keypoints = detection["keypoints"]
+                normalized_keypoints = (keypoints[..., :2] - boxes[..., :2]) / (boxes[..., 2:] - boxes[..., :2])
+                poses.append(normalized_keypoints.reshape(normalized_keypoints.shape[0], -1))
         return poses
 
     def forward(self, batch: Tensor, boxes: Tensor) -> list[Tensor]:

@@ -27,6 +27,9 @@ from .tiler_configuration import TilerConfigurationCallback
 from .timer import TimerCallback
 from .visualizer import ImageVisualizerCallback, MetricVisualizerCallback
 
+from .ai_vad.ai_vad_model_checkpoint import AiVadModelCheckpointCallback
+from .ai_vad.ai_vad_model_loader import AiVadLoadModelCallback
+
 __all__ = [
     "CdfNormalizationCallback",
     "GraphLogger",
@@ -38,6 +41,8 @@ __all__ = [
     "PostProcessingConfigurationCallback",
     "TilerConfigurationCallback",
     "TimerCallback",
+    "AiVadModelCheckpointCallback",
+    "AiVadLoadModelCallback"
 ]
 
 
@@ -60,18 +65,30 @@ def get_callbacks(config: DictConfig | ListConfig) -> list[Callback]:
     monitor_metric = None if "early_stopping" not in config.model.keys() else config.model.early_stopping.metric
     monitor_mode = "max" if "early_stopping" not in config.model.keys() else config.model.early_stopping.mode
 
-    checkpoint = ModelCheckpoint(
-        dirpath=os.path.join(config.project.path, "weights", "lightning"),
-        filename="model",
-        monitor=monitor_metric,
-        mode=monitor_mode,
-        auto_insert_metric_name=False,
-    )
+    if config.model.name == "ai_vad":
+        checkpoint = AiVadModelCheckpointCallback(
+            dirpath=os.path.join(config.project.path, "weights", "lightning"),
+            filename="model",
+            monitor=monitor_metric,
+            mode=monitor_mode,
+            auto_insert_metric_name=False,
+        )
+    else:
+        checkpoint = ModelCheckpoint(
+            dirpath=os.path.join(config.project.path, "weights", "lightning"),
+            filename="model",
+            monitor=monitor_metric,
+            mode=monitor_mode,
+            auto_insert_metric_name=False,
+        )
 
     callbacks.extend([checkpoint, TimerCallback()])
 
     if "resume_from_checkpoint" in config.trainer.keys() and config.trainer.resume_from_checkpoint is not None:
-        load_model = LoadModelCallback(config.trainer.resume_from_checkpoint)
+        if config.model.name == "ai_vad":
+            load_model = AiVadLoadModelCallback(config.trainer.resume_from_checkpoint)
+        else:
+            load_model = LoadModelCallback(config.trainer.resume_from_checkpoint)
         callbacks.append(load_model)
 
     # Add post-processing configurations to AnomalyModule.

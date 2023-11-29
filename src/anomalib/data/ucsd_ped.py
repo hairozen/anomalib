@@ -222,7 +222,7 @@ class UCSDped(AnomalibVideoDataModule):
         clip_length_in_frames: int = 1,
         frames_between_clips: int = 1,
         target_frame: VideoTargetFrame = VideoTargetFrame.LAST,
-        task: TaskType = TaskType.SEGMENTATION,
+        task: TaskType = TaskType.DETECTION,
         image_size: int | tuple[int, int] | None = None,
         center_crop: int | tuple[int, int] | None = None,
         normalization: str | InputNormalizationMethod = InputNormalizationMethod.IMAGENET,

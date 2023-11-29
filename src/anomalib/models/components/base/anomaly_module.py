@@ -198,15 +198,16 @@ class AnomalyModule(pl.LightningModule, ABC):
                     if boxes.numel():
                         outputs["pred_scores"][idx] = scores.max().item()
 
-            if "pred_boxes" in outputs and "anomaly_maps" not in outputs:
+            if "pred_boxes" in outputs and len(outputs["pred_boxes"]) > 0 and "anomaly_maps" not in outputs:
                 # create anomaly maps from bbox predictions for thresholding and evaluation
                 image_size: tuple[int, int] = outputs["image"].shape[-2:]
-                true_boxes: list[Tensor] = outputs["boxes"]
+                true_boxes: list[Tensor] = outputs["boxes"] if "boxes" in outputs else None
                 pred_boxes: Tensor = outputs["pred_boxes"]
                 box_scores: Tensor = outputs["box_scores"]
 
                 outputs["anomaly_maps"] = boxes_to_anomaly_maps(pred_boxes, box_scores, image_size)
-                outputs["mask"] = boxes_to_masks(true_boxes, image_size)
+                if true_boxes:
+                    outputs["mask"] = boxes_to_masks(true_boxes, image_size)
 
     def _outputs_to_cpu(self, output):
         if isinstance(output, dict):

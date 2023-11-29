@@ -105,6 +105,10 @@ class AiVad(AnomalyModule):
         #   is run within train epoch.
         self.model.density_estimator.fit()
 
+    def on_predict_start(self):
+        """Fit the density estimators to the extracted features from the training set."""    
+        self.model.density_estimator.fit()
+
     def validation_step(self, batch: dict[str, str | Tensor], *args, **kwargs) -> STEP_OUTPUT:
         """Validation Step of AI-VAD.
 

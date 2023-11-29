@@ -69,7 +69,6 @@ class RegionExtractor(nn.Module):
             regions = self.add_foreground_boxes(
                 regions, first_frame, last_frame, self.foreground_kernel_size, self.foreground_binary_threshold
             )
-
         regions = self.post_process_bbox_detections(regions)
 
         return regions
@@ -204,6 +203,10 @@ class RegionExtractor(nn.Module):
         Returns:
             dict[str, Tensor]: Region detections from which overlapping regions have been removed.
         """
+
+        # skip if there is less than two boxes
+        if regions["boxes"].numel() <= 4:
+            return regions
 
         # sort boxes by area
         areas = box_area(regions["boxes"])

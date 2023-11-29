@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import Any
+import logging
 
 import torch
 from sklearn.mixture import GaussianMixture
@@ -14,6 +15,16 @@ from torch import Tensor, nn
 
 from anomalib.models.ai_vad.features import FeatureType
 from anomalib.utils.metrics.min_max import MinMax
+
+
+logger = logging.getLogger(__name__)
+
+
+def my_vstack(memory_bank: list[Tensor] | Tensor) -> Tensor:
+    if torch.is_tensor(memory_bank):
+        return torch.vstack((memory_bank, ))
+    else:
+        return torch.vstack(memory_bank)
 
 
 class BaseDensityEstimator(nn.Module, ABC):
@@ -66,6 +77,9 @@ class CombinedDensityEstimator(BaseDensityEstimator):
         n_components_velocity: int = 5,
     ) -> None:
         super().__init__()
+        
+        # Control whether to fit the estimators
+        self.is_fitted = False
 
         self.use_pose_features = use_pose_features
         self.use_deep_features = use_deep_features
@@ -95,12 +109,17 @@ class CombinedDensityEstimator(BaseDensityEstimator):
 
     def fit(self):
         """Fit the density estimation models on the collected features."""
-        if self.use_velocity_features:
-            self.velocity_estimator.fit()
-        if self.use_deep_features:
-            self.appearance_estimator.fit()
-        if self.use_pose_features:
-            self.pose_estimator.fit()
+        if not self.is_fitted:
+            logger.info("Fitting the density estimators")
+            if self.use_velocity_features:
+                self.velocity_estimator.fit()
+            if self.use_deep_features:
+                self.appearance_estimator.fit()
+            if self.use_pose_features:
+                self.pose_estimator.fit()
+            self.is_fitted = True
+        else:
+            logger.info("Density estimators were already fitted")
 
     def predict(self, features: dict[FeatureType, Tensor]) -> tuple[Tensor, Tensor]:
         """Predict the region- and image-level anomaly scores for an image based on a set of features.
@@ -154,16 +173,16 @@ class GroupedKNNEstimator(BaseDensityEstimator):
             features (Tensor): Feature vectors extracted from a video frame.
             group (Any): Identifier of the group (video) from which the frame was sampled.
         """
-        group = group or "default"
-
-        if group in self.memory_bank:
-            self.memory_bank[group].append(features)
-        else:
-            self.memory_bank[group] = [features]
+        if features.numel():
+            group = group or "default"
+            if group in self.memory_bank:
+                self.memory_bank[group].append(features)
+            else:
+                self.memory_bank[group] = [features]
 
     def fit(self) -> None:
         """Fit the KNN model by stacking the feature vectors and computing the normalization statistics."""
-        self.memory_bank = {key: torch.vstack(value) for key, value in self.memory_bank.items()}
+        self.memory_bank = {key: my_vstack(value) for key, value in self.memory_bank.items()}
         self._compute_normalization_statistics()
 
     def predict(self, features: Tensor, group: Any = None, n_neighbors: int = 1, normalize: bool = True) -> Tensor:
@@ -186,7 +205,7 @@ class GroupedKNNEstimator(BaseDensityEstimator):
         else:
             mem_bank = self.memory_bank
 
-        mem_bank_tensor = torch.vstack(list(mem_bank.values()))
+        mem_bank_tensor = my_vstack(list(mem_bank.values()))
 
         distances = self._nearest_neighbors(mem_bank_tensor, features, n_neighbors=n_neighbors)
 
@@ -206,6 +225,8 @@ class GroupedKNNEstimator(BaseDensityEstimator):
         Returns:
             Tensor: Distances between the input features and their K nearest neighbors in the feature bank.
         """
+        features = features.float().to(feature_bank.device)
+        feature_bank = feature_bank.float()
         distances = torch.cdist(features, feature_bank, p=2.0)  # euclidean norm
         if n_neighbors == 1:
             # when n_neighbors is 1, speed up computation by using min instead of topk
@@ -230,7 +251,7 @@ class GroupedKNNEstimator(BaseDensityEstimator):
         Returns:
             Tensor: Normalized distances.
         """
-        return (distances - self.normalization_statistics.min) / (
+        return (distances.to(self.normalization_statistics.min.device) - self.normalization_statistics.min) / (
             self.normalization_statistics.max - self.normalization_statistics.min
         )
 
@@ -254,11 +275,12 @@ class GMMEstimator(BaseDensityEstimator):
     def update(self, features: Tensor, group: Any = None):
         """Update the feature bank."""
         del group
-        self.memory_bank.append(features)
+        if features.numel():
+            self.memory_bank.append(features)
 
     def fit(self):
         """Fit the GMM and compute normalization statistics."""
-        self.memory_bank = torch.vstack(self.memory_bank)
+        self.memory_bank = my_vstack(self.memory_bank)
         self.gmm.fit(self.memory_bank.cpu())
         self._compute_normalization_statistics()
 

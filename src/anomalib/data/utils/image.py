@@ -36,7 +36,7 @@ def get_image_filenames(path: str | Path) -> list[Path]:
         image_filenames = [path]
 
     if path.is_dir():
-        image_filenames = [p for p in path.glob("**/*") if p.suffix in IMG_EXTENSIONS]
+        image_filenames = [p for p in path.glob("**/*") if p.suffix in IMG_EXTENSIONS and not any([p.startswith(".") for p in Path(p).parts])]
 
     if not image_filenames:
         raise ValueError(f"Found 0 images in {path}")

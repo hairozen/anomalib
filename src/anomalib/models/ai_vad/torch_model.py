@@ -107,8 +107,15 @@ class AiVadModel(nn.Module):
         self.feature_extractor.eval()
 
         # 1. get first and last frame from clip
-        first_frame = batch[:, 0, ...]
-        last_frame = batch[:, -1, ...]
+
+        # Input image of shape (N, L, C, H, W)
+        if batch.dim() == 5:
+            first_frame = batch[:, 0, ...]
+            last_frame = batch[:, -1, ...]
+        # Input image of shape (N, C, H, W) where the sequence length (L) is one
+        else:
+            first_frame = batch
+            last_frame = batch
 
         # 2. extract flows and regions
         with torch.no_grad():
@@ -124,10 +131,17 @@ class AiVadModel(nn.Module):
         # 4. estimate density
         box_scores = []
         image_scores = []
+        box_locations = []
         for features in features_per_batch:
-            box, image = self.density_estimator(features)
-            box_scores.append(box)
-            image_scores.append(image)
+            # in cases there are no features (since there are boxes), add dummy values to preserve batch items order 
+            if all([not values.numel() for key, values in features.items()]):
+                box_scores.append(torch.tensor(0))
+                image_scores.append(torch.tensor(0))
+            else:
+                box, image = self.density_estimator(features)
+                box_scores.append(box)
+                image_scores.append(image)
 
         box_locations = [batch_item["boxes"] for batch_item in regions]
+
         return box_locations, box_scores, image_scores
